@@ -33,24 +33,22 @@ body {
     box-sizing: border-box;
     -moz-box-sizing: border-box;
     width: 40%;
-    margin: 2%;
+    margin: 1%;
     vertical-align: top;
 }
 #banner {
-    font-size: 40pt;
+    font-size: 30pt;
     font-weight: 800;
     font-style: italic;
     color: white;
     text-shadow: -1px 0 black, 0 2px black, 1px 0 black, 0 -1px black;
-    height: 100px;
+    height: 60px;
 }
-#status 
+.status
 {
-    width: 80%;
     border: 1px dotted gray;
     padding: 1%;
     background-color: #CCCCCC;
-    height: 80%;
 }
 .board {
     background-color: #111111;
@@ -87,6 +85,13 @@ body {
 .cellMiss{
     opacity: 0.5;
     background-color: #008000;
+    z-index: 2;
+}
+
+
+.cellNotHit {
+    opacity: 0.5;
+    background-color: yellow;
     z-index: 2;
 }
 

@@ -1,6 +1,11 @@
 /// <reference path="jquery.d.ts" />
 /// <reference path='jqueryui.d.ts' />
 
+class BoardPosition {
+    row: number;
+    column: number;
+}
+
 class Cell {
     shipIndex: number;
     hasHit: boolean;
@@ -89,6 +94,8 @@ class Board {
     playerTurn = false;          // Set to true when player can move
     onEvent: Function;           // Callback function when an action on the board occurs
     shipSizes = [5, 4, 3, 3, 2];
+    nextShotsAfterHit = [];
+    sunkShips: number = 0;
 
     private positioningEnabled: boolean;    // Set to true when the player can position the ships
 
@@ -171,6 +178,22 @@ class Board {
             "vertical": (Math.floor(Math.random() * 2) === 1)
         }
     }
+    getRandomPositionOnShotGrid() {
+        do {
+            var testPos = {
+                "row": Math.floor(Math.random() * 10),
+                "column": Math.floor(Math.random() * 10),
+            }
+        } while (Math.abs((testPos.row + testPos.column) % 2) != 1); // if row + column add to an odd number shoot at it.
+        return testPos;
+    }
+
+    static isValidCell(posRow: number, posColumn: number) {
+        if (posRow < 0 || posRow > 9 || posColumn < 0 || posColumn > 9 ) {
+            return false;
+        }
+        return true;
+    }
 
     onCellClick(evt: JQueryEventObject) {
         var x = <HTMLElement>evt.target;
@@ -200,17 +223,17 @@ class Board {
             ship.hits++;
             if (ship.isSunk()) {
                 if (this.allShipsSunk()) {
-                    this.onEvent.call(this, 'allSunk');
+                    this.onEvent.call(this, 'allSunk', cellPos);
                 } else {
-                    this.onEvent.call(this, 'shipSunk');
+                    this.onEvent.call(this, 'shipSunk', cellPos);
                 }
             } else {
-                this.onEvent.call(this, 'hit');
+                this.onEvent.call(this, 'hit', cellPos);
             }
         } else {
             $(cellElem).removeClass("notBombed");
             $(cellElem).addClass("cellMiss");
-            this.onEvent.call(this, 'playerMissed');
+            this.onEvent.call(this, 'playerMissed', cellPos);
         }
     }
 
@@ -249,8 +272,13 @@ class Board {
 
     chooseMove() {
         do {
-            var pos = Board.getRandomPosition();
-            var cell = this.cells[pos.row][pos.column];
+            var cell: Cell;
+            if (this.nextShotsAfterHit && this.nextShotsAfterHit.length > 0) {
+                cell = this.nextShotsAfterHit.pop();
+            } else {
+                var pos = this.getRandomPositionOnShotGrid();
+                var cell = this.cells[pos.row][pos.column];
+            }
         } while (cell.hasHit);
         this.bombCell(cell.element);
     }
@@ -273,7 +301,7 @@ class Board {
             }
         }
 
-        $(this.element).children(".cell").removeClass("cellHit cellMiss").addClass("notBombed");
+        $(this.element).children(".cell").removeClass("cellHit cellMiss cellNotHit").addClass("notBombed");
     }
 
     private allShipsSunk() {
@@ -288,10 +316,11 @@ class Game {
         invalidPositions: "All ships must be in valid positions before the game can begin.",
         wait: "Wait your turn!",
         gameOn: "Game on!",
-        hit: "Good hit!",
+        miss: "Miss!",
+        hit: "Hit!",
         shipSunk: "You sunk a ship!",
         lostShip: "You lost a ship :-(",
-        lostGame: "You lost this time. Click anywhere on the left board to play again.",
+        lostGame: "Computer wins this time. Click anywhere on the left board to play again.",
         allSunk: "Congratulations!  You won!  Click anywhere on the left board to play again."
     };
 
@@ -300,13 +329,16 @@ class Game {
     computerBoard: Board;
 
     constructor() {
-        this.updateStatus(Game.msgs.gameStart);
+        this.updateComputerStatus(Game.msgs.gameStart);
         this.playerBoard = new Board($("#playerBoard")[0]);
         this.computerBoard = new Board($("#computerBoard")[0], false);
         this.computerBoard.randomize();
         this.playerBoard.randomize();
         this.playerBoard.dragAndDropEnabled = true;
-        this.computerBoard.onEvent = (evt: string) => {
+        var self = this;
+        $("#playerShipsSunk").text(this.playerBoard.sunkShips + ' ships sunk.');
+        $("#computerShipsSunk").text(this.computerBoard.sunkShips + ' ships sunk.');
+        this.computerBoard.onEvent = (evt: string, pos: BoardPosition) => {
             switch (evt) {
                 case 'click': // The user has click outside a turn.  Action depends on current state
                     switch (this.state) {
@@ -314,48 +346,69 @@ class Game {
                             this.startGame();
                             break;
                         case Game.gameState.computerTurn:  // Not their turn yet.  Ask to wait.
-                            this.updateStatus(Game.msgs.wait);
+                            this.updateComputerStatus(Game.msgs.wait);
                             break;
                         case Game.gameState.finished: // Start a new game
                             this.computerBoard.randomize();
                             this.playerBoard.randomize();
                             this.playerBoard.dragAndDropEnabled = true;
-                            this.updateStatus(Game.msgs.gameStart);
+                            this.updateComputerStatus(Game.msgs.gameStart);
+                            this.playerBoard.sunkShips = 0;
+                            this.computerBoard.sunkShips = 0;
+                            self.playerBoard.nextShotsAfterHit = [];
+                            $("#playerShipsSunk").text(this.playerBoard.sunkShips + ' ships sunk.');
+                            $("#computerShipsSunk").text(this.computerBoard.sunkShips + ' ships sunk.');
                             this.state = Game.gameState.begin;
                             break;
                     }
                     break;
                 case 'playerMissed':
+                    this.updatePlayerStatus(Game.msgs.miss);
                     this.computersTurn();
                     break;
                 case 'hit':
-                    this.updateStatus(Game.msgs.hit);
+                    this.updatePlayerStatus(Game.msgs.hit);
                     this.computersTurn();
                     break;
                 case 'shipSunk':
-                    this.updateStatus(Game.msgs.shipSunk);
+                    this.playerBoard.sunkShips++;
+                    $("#playerShipsSunk").text(this.playerBoard.sunkShips + ' ships sunk.');
+                    this.updatePlayerStatus(Game.msgs.shipSunk);
                     this.computersTurn();
                     break;
                 case 'allSunk':
                     this.state = Game.gameState.finished;
                     this.computerBoard.playerTurn = false;
-                    this.updateStatus(Game.msgs.allSunk);
+                    this.playerBoard.sunkShips++;
+                    $("#playerShipsSunk").text(this.playerBoard.sunkShips + ' ships sunk.');
+                    this.updatePlayerStatus(Game.msgs.allSunk);
                     break;
             }
         };
-        this.playerBoard.onEvent = (evt: string) => {
+        this.playerBoard.onEvent = (evt: string, pos: BoardPosition) => {
             switch (evt) {
                 case 'playerMissed':
-                case 'hit':
+                    this.updateComputerStatus(Game.msgs.miss);
                     this.computerBoard.playerTurn = true;
                     break;
+                case 'hit':
+                    this.updateComputerStatus(Game.msgs.hit);
+                    this.computerBoard.playerTurn = true;
+                    this.addNextShots(this.playerBoard, this.playerBoard.nextShotsAfterHit, pos.row, pos.column);
+                    break;
                 case 'shipSunk':
-                    this.updateStatus(Game.msgs.lostShip);
+                    this.updateComputerStatus(Game.msgs.lostShip);
+                    this.computerBoard.sunkShips++;
+                    $("#computerShipsSunk").text(this.computerBoard.sunkShips + ' ships sunk.');
+                    this.addNextShots(this.playerBoard, this.playerBoard.nextShotsAfterHit, pos.row, pos.column);
                     this.computerBoard.playerTurn = true;
                     break;
                 case 'allSunk':
-                    this.updateStatus(Game.msgs.lostGame);
+                    this.updateComputerStatus(Game.msgs.lostGame);
                     this.computerBoard.playerTurn = false;
+                    this.computerBoard.sunkShips++;
+                    $("#computerShipsSunk").text(this.computerBoard.sunkShips + ' ships sunk.');
+                    this.LostGame(this.computerBoard);
                     this.state = Game.gameState.finished;
                     break;
             }
@@ -375,17 +428,51 @@ class Game {
             this.state = Game.gameState.playerTurn;
             this.playerBoard.dragAndDropEnabled = false;
             this.computerBoard.playerTurn = true;
-            this.updateStatus(Game.msgs.gameOn);
+            this.updatePlayerStatus(Game.msgs.gameOn);
         }
         else {
-            this.updateStatus(Game.msgs.invalidPositions);
+            this.updatePlayerStatus(Game.msgs.invalidPositions);
         }
     }
 
-    private updateStatus(msg: string) {
-        $("#status").slideUp('fast', function () {  // Slide out the old text
+
+    private LostGame(board: Board) {
+        for (var row = 0; row < 10; row++) {
+            for (var column = 0; column < 10; column++) {
+                var cell = board.cells[row][column];
+                if (!cell.hasHit && cell.shipIndex >= 0) { // Has a ship
+                    $(cell.element).removeClass("notBombed");
+                    $(cell.element).addClass("cellNotHit");
+                }
+            }
+        }
+    }
+
+    private updateComputerStatus(msg: string) {
+        $("#computerStatus").slideUp('fast', function () {  // Slide out the old text
             $(this).text(msg).slideDown('fast');  // Then slide in the new text
         });
+    }
+
+    private updatePlayerStatus(msg: string) {
+        $("#playerStatus").slideUp('fast', function () {  // Slide out the old text
+            $(this).text(msg).slideDown('fast');  // Then slide in the new text
+        });
+    }
+
+    private addNextShots(board: Board, shotsArray: Cell[], posRow: number, posColumn: number) {
+        if (Board.isValidCell(posRow + 1, posColumn)) {
+            shotsArray.push(board.cells[posRow + 1][posColumn]);
+        }
+        if (Board.isValidCell(posRow - 1, posColumn)) {
+            shotsArray.push(board.cells[posRow - 1][posColumn]);
+        }
+        if (Board.isValidCell(posRow, posColumn + 1)) {
+            shotsArray.push(board.cells[posRow][posColumn + 1]);
+        }
+        if (Board.isValidCell(posRow, posColumn - 1)) {
+            shotsArray.push(board.cells[posRow][posColumn - 1]);
+        }
     }
 }
 
